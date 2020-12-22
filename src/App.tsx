@@ -1,48 +1,64 @@
-import { useEffect, useState } from "react";
+import * as As from "@effect-ts/core/Async";
 import "@effect-ts/core/Operators";
 import * as Sy from "@effect-ts/core/Sync";
 import * as Sl from "@effect-ts/core/Sync/Layer";
-import * as As from "@effect-ts/core/Async";
-
+import { matchTag } from "@effect-ts/core/Utils";
+import React, { useEffect, useState } from "react";
 import styles from "./App.module.css";
-import { Github, LiveGithub } from "./effects/github";
-import React from "react";
-import { FetchError, TextError } from "./effects/http";
+import { Github } from "./effects/github";
 
-export default () => {
-  const [zen, setZen] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  const getNewZen = async () => {
-    try {
-      const z = await As.runPromise(getZen());
-      setZen(z);
-      setErr(null);
-    } catch (e) {
-      if (e instanceof FetchError || e instanceof TextError) {
-        setErr(`Unable to get new zen: ${e.error}`);
-      } else {
-        setErr(`Unable to get new zen: ${e}`);
-      }
-    }
-  };
-
-  useEffect(() => {
-    getNewZen();
-  }, []);
-
-  return (
-    <>
-      <p>{zen}</p>
-      {err != null && <p className="error">{err}</p>}
-      <button onClick={async () => getNewZen()}>Get new zen</button>
-    </>
-  );
-};
-
-const { getZen } = Sy.gen(function* (_) {
+const app = Sy.gen(function* (_) {
   const { getZen } = yield* _(Github);
-  return { getZen };
-})
-  ["|>"](Sl.provideSyncLayer(LiveGithub))
-  ["|>"](Sy.run);
+
+  function App() {
+    const [zen, setZen] = useState<string | null>(null);
+    const [err, setErr] = useState<string | null>(null);
+
+    const getNewZen = async () => {
+      As.runAsync(getZen(), (ex) => {
+        ex["|>"](
+          matchTag({
+            Success: ({ a }) => {
+              setZen(a);
+              setErr(null);
+            },
+            Failure: ({ e }) => {
+              setErr(e.toString());
+            },
+            Interrupt: (_) => {
+              setErr("Interrupted");
+            },
+          })
+        );
+      });
+    };
+
+    useEffect(() => {
+      getNewZen();
+    }, []);
+
+    return (
+      <>
+        <p title="zen">{zen}</p>
+        {err != null && (
+          <p title="error" className={styles.error}>
+            {err}
+          </p>
+        )}
+        <button onClick={async () => getNewZen()}>Get new zen</button>
+      </>
+    );
+  }
+  return App();
+});
+
+export default function App<
+  L extends Sl.SyncLayer<
+    unknown,
+    never,
+    typeof app extends Sy.Sync<infer R, never, any> ? R : never
+  >
+>(props: { layer: L }) {
+  // app is Sy.Sync<Has<Github>, never, JSX.Element>
+  return app["|>"](Sl.provideSyncLayer(props.layer))["|>"](Sy.run);
+}

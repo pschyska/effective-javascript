@@ -1,7 +1,4 @@
-:host {
-  text-align: center;
-  color: deepskyblue;
-}
 .error {
   color: coral;
+  background-color: darkslategrey;
 }

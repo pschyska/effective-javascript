@@ -3,6 +3,7 @@ import * as Sl from "@effect-ts/core/Sync/Layer";
 import * as Sy from "@effect-ts/core/Sync";
 import * as As from "@effect-ts/core/Async";
 import type { _A } from "@effect-ts/core/Utils";
+import { fetch } from "cross-fetch";
 
 const makeFetch = () => {
   return {
@@ -10,17 +11,31 @@ const makeFetch = () => {
   };
 };
 
-export class FetchError {
-  readonly _tag = "HttpError";
-  constructor(readonly error: unknown) {}
+export abstract class HttpError {
+  abstract readonly _tag: string = "HttpError";
+  readonly error: string;
+  constructor(error: unknown) {
+    this.error =
+      typeof error === "string"
+        ? error
+        : error instanceof Object
+        ? error.toString()
+        : "<unknown>";
+  }
+  toString(): string {
+    return `${this._tag}: ${this.error}`;
+  }
+  get [Symbol.toStringTag](): string {
+    return this._tag;
+  }
 }
-export class TextError {
-  readonly _tag = "TextError";
-  constructor(readonly error: unknown) {}
+
+export class FetchError extends HttpError {
+  readonly _tag = "FetchError";
 }
-export class JsonError {
+
+export class DecodeError extends HttpError {
   readonly _tag = "JsonError";
-  constructor(readonly error: unknown) {}
 }
 
 export interface Fetch extends ReturnType<typeof makeFetch> {}
@@ -38,21 +53,27 @@ const makeHttp = Sy.gen(function* (_) {
   const _fetch = (url: string) =>
     As.gen(function* (_) {
       const res = yield* _(
-        As.promise((u) => new FetchError(u))(async () => fetch(url, init))
+        As.promise((u) => new FetchError(u))(() => fetch(url, init))
       );
       if (!res.ok) {
-        return yield* _(As.fail(new FetchError(res)));
+        return yield* _(
+          As.fail(new FetchError(`not ok, ${res.status} "${res.statusText}"`))
+        );
       }
       return res;
     });
   return {
     getJson: (url: string) =>
       _fetch(url)["|>"](
-        As.chain((res) => As.promise((u) => new JsonError(u))(() => res.json()))
+        As.chain((res) =>
+          As.promise((u) => new DecodeError(u))(() => res.json())
+        )
       ),
     getText: (url: string) =>
       _fetch(url)["|>"](
-        As.chain((res) => As.promise((u) => new JsonError(u))(() => res.text()))
+        As.chain((res) =>
+          As.promise((u) => new DecodeError(u))(() => res.text())
+        )
       ),
   };
 });
